@@ -1277,6 +1277,11 @@ class Viewport(QOpenGLWidget):
         # and drawn in the QPainter overlay (thick, reliable pen).
         self._overlay_rubber: Optional[tuple] = None
 
+        # The corner view cube: click a face for its standard view,
+        # drag to orbit. A QPainter-overlay citizen, never exported.
+        from views.viewcube import ViewCube
+        self._viewcube = ViewCube()
+
         # Rubber-band box selection (left-drag with a box_select tool).
         self._box_active = False
         self._box_start: Optional[QPointF] = None
@@ -6910,6 +6915,11 @@ class Viewport(QOpenGLWidget):
         # Rubber-band selection box.
         self._draw_selection_box(painter)
         self._draw_zoom_box(painter)
+
+        # The view cube, last so it sits on top of everything — but never
+        # in an exported image (the file must not carry the widget).
+        if self._export_size is None:
+            self._viewcube.draw(painter, self)
 
         painter.end()
 
@@ -13190,6 +13200,9 @@ class Viewport(QOpenGLWidget):
         # second click of a line) the tool is still busy and nothing moves.
         self._release_linear_mode()
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
+        if (ev.button() == Qt.LeftButton
+                and self._viewcube.press(ev.position().toPoint(), self)):
+            return                       # the corner gizmo owns its clicks
         if (ev.button() in (Qt.LeftButton, Qt.RightButton)
                 and self.nav_mode is None and self._look_drag is None
                 and callable(getattr(self.active_tool, "on_look", None))):
@@ -13402,6 +13415,8 @@ class Viewport(QOpenGLWidget):
 
     def mouseMoveEvent(self, ev) -> None:
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
+        if self._viewcube.move(ev.position().toPoint(), ev.buttons(), self):
+            return                            # a gizmo drag orbits here
         # An Alt released while another window had the keyboard never
         # reaches any filter here; the pointer re-reads it on the move.
         alt = bool(ev.modifiers() & Qt.AltModifier)
@@ -13690,6 +13705,9 @@ class Viewport(QOpenGLWidget):
     BOX_DRAG_THRESHOLD_PX = 4.0
 
     def mouseReleaseEvent(self, ev) -> None:
+        if (ev.button() == Qt.LeftButton
+                and self._viewcube.release(ev.position().toPoint(), self)):
+            return
         if self._look_drag is not None and ev.button() == self._look_drag[0]:
             self._end_look()
             return
